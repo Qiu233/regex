@@ -1,10 +1,8 @@
 import Lean
 import Regex.Parser
 
-open Lean Meta PrettyPrinter Elab Term
-open Parser
-
-namespace Regex
+namespace Regex.Elab
+open Lean Meta Elab Term Parser RegEx
 
 structure Context where
   inSet : Bool := false
@@ -141,7 +139,6 @@ private partial def elabRegexQuantified : TSyntax `regexAtomQuantified → Regex
 
 end
 
-open Regex.Parser in
 @[term_elab Regex.Parser.regex]
 def elabRegex : TermElab := fun stx type? => do
   if stx.hasMissing then
