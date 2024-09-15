@@ -5,7 +5,7 @@ open Lean Parser PrettyPrinter Syntax.MonadTraverser
 
 namespace Regex.Parser
 
-/- **DESIGN NOTE:**
+/- **DESIGN NOTE**
 Our purpose is to find as much as errors with aid of Lean4's compiler.
 
 Whitespaces must be handled manually, because Lean4's infrastructure doesn't care about the spaces between tokens.
@@ -29,15 +29,15 @@ There's no antiquot due to recursion, and cannot be implemented with syntax cate
 
   body → atomChar | Set | Group
 
-  quant → '*' | '+' | '?' | quantRange
-  quantRange → '{' num (',' num?)? '}'
+  quant → '*' | '+' | '?' | QuantRange
+  QuantRange → '{' num (',' num?)? '}'
 
   Group → '(' Atom ')'
 
-  Set → '[' regexSetElem* ']'
-  Set → '[^' regexSetElem* ']'
+  Set → '[' SetElem* ']'
+  Set → '[^' SetElem* ']'
 
-  regexSetElem → setChar ('-' setChar)
+  SetElem → setChar ('-' setChar)
 
 -/
 
@@ -45,8 +45,9 @@ There's no antiquot due to recursion, and cannot be implemented with syntax cate
 -- set_option trace.Elab.definition true
 
 def escapes : Array Char := #[ 'w', 'W', 's', 'S', 'd', 'D', 'n', 'r', 't' ]
-def metaChars : Array Char := #[ '*', '+', '?', '(', ')', '[', ']', '{', '}' ]
+def metaChars : Array Char := #[ '*', '+', '?', '(', ')', '[', ']', '{', '}', '|' ]
 def metaCharsSetElem : Array Char := metaChars.erase ']'
+def forbiddenChars : Array Char := #['\r', '\n', '\t'] -- other characters is forbidden by Lean4?
 
 partial def regexCharEscapedAux : ParserFn := rawFn (trailingWs := false) fun c s =>
   let input := c.input
@@ -68,7 +69,10 @@ partial def regexCharFn (meta : Bool) : ParserFn := fun c s =>
   let input := c.input
   let i     := s.pos
   let curr  := input.get i
-  if curr == ' ' || curr.isAlpha || curr.isDigit || curr == '_' || curr == '-' || curr == '.' || curr == '^' || curr == '$' then
+  if forbiddenChars.contains curr then
+    s.mkUnexpectedErrorAt s!"unexpected forbidden character '{curr}'" i
+  else if curr == ' ' || curr.isAlpha || curr.isDigit || curr == '_' || curr == '-' ||
+     curr == '.' || curr == '^' || curr == '$' || curr == '\"' then
     rawFn (satisfyFn (fun _ => true) "") false c s
   else if !meta && metaCharsSetElem.contains curr then
     rawFn (satisfyFn (fun _ => true) "") false c s
@@ -120,6 +124,7 @@ private def ch_sharp : Parser := rawCh '#'
 private def ch_r : Parser := rawCh 'r'
 private def ch_e : Parser := rawCh 'e'
 private def ch_dquote : Parser := rawCh '"'
+private def ch_vbar : Parser := rawCh '|'
 
 def regexSetElem : Parser := node `regexSetElem <| regexSetChar >> atomic (optional (ch_bar >> regexSetChar))
 
@@ -175,7 +180,7 @@ partial def regexAtomGroupedFn := nodeFn `regexAtomGrouped fun c s =>
   let i := s.pos
   let curr := c.input.get i
   if curr == '(' then
-    andthenFn ch_parenL.fn (andthenFn (manyFn regexAtomFn) ch_parenR.fn) c s
+    andthenFn ch_parenL.fn (andthenFn regexAtomFn ch_parenR.fn) c s
   else
     s.mkErrorAt "'('" i
 
@@ -229,9 +234,9 @@ partial def regexAtomGrouped.formatter : Formatter := do
   checkKind `regexAtomGrouped
   visitArgs do
     rawCh.formatter ')'
-    many.formatter regexAtom.formatter
+    regexAtom.formatter
     rawCh.formatter '('
 
 end
 
-syntax (name := regex) "re" noWs ch_dquote noWs (regexAtom)? noWs ch_dquote : term
+syntax (name := regex) withPosition("[regex" noWs ch_vbar noWs (regexAtom)? noWs "]") : term

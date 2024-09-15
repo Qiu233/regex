@@ -1,3 +1,8 @@
+namespace Regex
+
+/- **DESIGN NOTE**
+The following types serve as AST but not what to be run effectively.
+-/
 
 inductive Quant where
   | many
@@ -6,11 +11,13 @@ inductive Quant where
   | range (n : Nat) (m : Nat)
   | rangeLeast (n : Nat)
   | rangeExact (n : Nat)
+deriving Inhabited, Repr
 
 inductive Fuzzy where
   | w | W
   | s | S
   | d | D
+deriving Inhabited, Repr
 
 inductive RegEx where
   | none
@@ -19,8 +26,11 @@ inductive RegEx where
   | dollar -- $
   | char (c : Char)
   | fuzzy (c : Fuzzy)
-  | set (rs : Array RegEx)
+  | or (rs : Array RegEx) -- α|β
+  | set (rs : Array RegEx) --
+  | setRange (low : Char) (high : Char)
+  | setNeg (rs : Array RegEx)
   | seq (rs : Array RegEx)
-  | or (a b : RegEx)
   | group (a : RegEx)
   | quant (e : RegEx) (q : Quant)
+deriving Inhabited, Repr
