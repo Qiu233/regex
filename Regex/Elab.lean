@@ -46,8 +46,12 @@ private partial def elabRegexAtom : TSyntax `regexAtom → RegexElabM Expr := fu
   let ors ← components.mapM fun qs => withRef qs do
     let qs := TSyntaxArray.mk (ks := `regexAtomQuantified) qs.getArgs
     let ands ← qs.mapM fun (q : TSyntax `regexAtomQuantified) => withRef q (elabRegexQuantified q)
+    if ands.size == 1 then
+      return ands[0]!
     let arr ← mkArrayLit typeExpr ands.toList
     return Expr.app (Expr.const ``RegEx.seq []) arr
+  if ors.size == 1 then
+    return ors[0]!
   let arr ← mkArrayLit typeExpr ors.toList
   return Expr.app (Expr.const ``RegEx.set []) arr
 
@@ -147,19 +151,18 @@ def elabRegex : TermElab := fun stx type? => do
     let ex := Expr.const ``RegEx []
     unless (← isDefEq type ex) do
       throwTypeExcepted ex
-  match stx.getKind with
-  | ``regex =>
-    let atom? := stx[2]
-    if atom?.isNone then
-      return Expr.const ``RegEx.none []
-    let atom := atom?[0]
-    let kind := atom.getKind
-    unless kind == `regexAtom do
-      throwError "expected syntax of kind `regexAtom, but got `{kind}"
-    let atom := TSyntax.mk (ks := `regexAtom) atom
-    let go := elabRegexAtom atom {}
-    go.run' {}
-  | _ => throwUnsupportedSyntax
+  unless stx.getKind == ``regex do
+    throwUnsupportedSyntax
+  let atom? := stx[2]
+  if atom?.isNone then
+    return Expr.const ``RegEx.none []
+  let atom := atom?[0]
+  let kind := atom.getKind
+  unless kind == `regexAtom do
+    throwError "expected syntax of kind `regexAtom, but got `{kind}"
+  let atom := TSyntax.mk (ks := `regexAtom) atom
+  let go := elabRegexAtom atom {}
+  go.run' {}
 
 run_meta do
   let t ← `(term| [regex|(ab|c|2|3)])

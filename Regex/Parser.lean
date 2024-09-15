@@ -96,7 +96,6 @@ def regexAtomChar : Parser where
 open Parenthesizer in
 @[combinator_parenthesizer regexAtomChar, combinator_parenthesizer regexSetChar]
 def regexChar.parenthesizer : Parenthesizer := do
-  checkKind `regexAtomChar
   visitToken
 
 open Formatter in
@@ -152,7 +151,12 @@ def regexSet : Parser := node `regexSet (regexSetPos <|> regexSetNeg)
 
 open Parenthesizer in
 @[combinator_parenthesizer regexSet]
-def regexSet.parenthesizer : Parenthesizer := do checkKind `regexSet; visitToken
+def regexSet.parenthesizer : Parenthesizer := do
+  checkKind `regexSet
+  visitArgs do
+    visitToken
+    many.parenthesizer regexSetElem.parenthesizer
+    visitToken
 
 open Formatter in
 @[combinator_formatter regexSet]
@@ -202,11 +206,33 @@ open Parenthesizer Formatter in
 mutual
 
 @[combinator_parenthesizer regexAtomQuantified]
-partial def regexAtomQuantified.parenthesizer : Parenthesizer := do checkKind `regexAtomQuantified; visitToken
+partial def regexAtomQuantified.parenthesizer : Parenthesizer := do
+  checkKind `regexAtomQuantified
+  visitArgs do
+    if (← getCur).isNone then
+      goLeft
+    else
+      visitArgs regexQuant.parenthesizer
+    let stx ← getCur
+    match stx with
+    | .atom i s => regexChar.parenthesizer
+    | .node _ `regexSet _ => regexSet.parenthesizer
+    | .node _ `regexAtomGrouped _ => regexAtomGrouped.parenthesizer
+    | _ => throwError s!"unsupported {stx}"
+
 @[combinator_parenthesizer regexAtom]
-partial def regexAtom.parenthesizer : Parenthesizer := do checkKind `regexAtom; visitToken
+partial def regexAtom.parenthesizer : Parenthesizer := do
+  checkKind `regexAtom
+  visitArgs do
+    sepBy1.parenthesizer (many1.parenthesizer regexAtomQuantified.parenthesizer) "|" (rawCh.parenthesizer '|')
+
 @[combinator_parenthesizer regexAtomGrouped]
-partial def regexAtomGrouped.parenthesizer : Parenthesizer := do checkKind `regexAtomGrouped; visitToken
+partial def regexAtomGrouped.parenthesizer : Parenthesizer := do
+  checkKind `regexAtomGrouped
+  visitArgs do
+    rawCh.parenthesizer ')'
+    regexAtom.parenthesizer
+    rawCh.parenthesizer '('
 
 @[combinator_formatter regexAtomQuantified]
 partial def regexAtomQuantified.formatter : Formatter := do

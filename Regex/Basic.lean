@@ -24,7 +24,6 @@ inductive RegEx where
   | dollar -- $
   | char (c : Char)
   | fuzzy (c : RegEx.Fuzzy)
-  | or (rs : Array RegEx) -- α|β
   | set (rs : Array RegEx) --
   | setRange (low : Char) (high : Char)
   | setNeg (rs : Array RegEx)
