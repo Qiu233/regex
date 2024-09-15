@@ -44,10 +44,10 @@ There's no antiquot due to recursion, and cannot be implemented with syntax cate
 
 -- set_option trace.Elab.definition true
 
-def escapes : Array Char := #[ 'w', 'W', 's', 'S', 'd', 'D', 'n', 'r', 't' ]
+def escapes : Array Char := #[ 'w', 'W', 's', 'S', 'd', 'D', 'n', 'r', 't', 'f', 'v' ]
 def metaChars : Array Char := #[ '*', '+', '?', '(', ')', '[', ']', '{', '}', '|' ]
 def metaCharsSetElem : Array Char := metaChars.erase ']'
-def forbiddenChars : Array Char := #['\r', '\n', '\t'] -- other characters is forbidden by Lean4?
+def forbiddenChars : Array Char := #['\r', '\n', '\t', '\x0C', '\x0B'] -- other characters is forbidden by Lean4?
 
 partial def regexCharEscapedAux : ParserFn := rawFn (trailingWs := false) fun c s =>
   let input := c.input
@@ -129,7 +129,16 @@ def regexSetElem : Parser := node `regexSetElem <| regexSetChar >> atomic (optio
 
 open Parenthesizer in
 @[combinator_parenthesizer regexSetElem]
-def regexSetElem.parenthesizer : Parenthesizer := do checkKind `regexSetElem; visitToken
+def regexSetElem.parenthesizer : Parenthesizer := do
+  checkKind `regexSetElem
+  visitArgs do
+    if !(← getCur).isNone then
+      visitArgs do
+        regexChar.parenthesizer
+        visitToken
+    else
+      goLeft
+    regexChar.parenthesizer
 
 open Formatter in
 @[combinator_formatter regexSetElem]
@@ -139,15 +148,16 @@ partial def regexSetElem.formatter : Formatter := do
     if !(← getCur).isNone then
       visitArgs do
         regexChar.formatter
-        visitAtom Name.anonymous
+        modify fun st => { st with stack := st.stack.push "-", isUngrouped := false }
+        goLeft
     else
       goLeft
     regexChar.formatter
 
-def regexSetPos := ("[" >> many regexSetElem >> "]")
-def regexSetNeg := ("[^" >> many regexSetElem >> "]")
+def regexSetPos := atomic (rawCh '[' >> many regexSetElem >> rawCh ']')
+def regexSetNeg := atomic (group (rawCh '[' >> rawCh '^') >> many regexSetElem >> rawCh ']')
 
-def regexSet : Parser := node `regexSet (regexSetPos <|> regexSetNeg)
+def regexSet : Parser := node `regexSet (regexSetNeg <|> regexSetPos)
 
 open Parenthesizer in
 @[combinator_parenthesizer regexSet]

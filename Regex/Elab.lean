@@ -26,6 +26,8 @@ private def escape? : String → Option Char
   | "\\r" => '\r'
   | "\\n" => '\n'
   | "\\t" => '\t'
+  | "\\f" => '\x0C'
+  | "\\v" => '\x0B'
   | _ => none
 
 private def fuzzy? : String → Option Expr
@@ -83,6 +85,8 @@ private partial def elabRegexSetElem : TSyntax `regexSetElem → RegexElabM Expr
       | throwErrorAt char "invalid character class"
     let (_, some highC) ← elabRegexChar suffix[1]!
       | throwErrorAt suffix[1]! "invalid character class"
+    if lowC > highC then
+      throwError "invalid character class"
     return Expr.app (Expr.app (Expr.const ``RegEx.setRange []) (mkCharLit lowC)) (mkCharLit highC)
 
 private partial def elabRegexBody : Syntax → RegexElabM Expr := fun body => do
@@ -93,11 +97,12 @@ private partial def elabRegexBody : Syntax → RegexElabM Expr := fun body => do
   | .node _ `regexSet args =>
     let head := args[0]!
     let setElems : TSyntaxArray `regexSetElem := TSyntaxArray.mk args[1]!.getArgs
-    let setElems ← withTheReader Context ({· with inSet := true}) <| setElems.mapM elabRegexSetElem
+    let setElems ← withTheReader Context ({· with inSet := true}) do
+      setElems.mapM fun elem => withRef elem.raw <| elabRegexSetElem elem
     let arr ← mkArrayLit typeExpr setElems.toList
     match head with
     | .atom _ "[" => pure <| Expr.app (Expr.const ``RegEx.set []) arr
-    | .atom _ "[^" => pure <| Expr.app (Expr.const ``RegEx.setNeg []) arr
+    | .node _ `group #[.atom _ "[", .atom _ "^"] => pure <| Expr.app (Expr.const ``RegEx.setNeg []) arr
     | _ => withRef head throwUnsupportedSyntax
   | .node _ `regexAtomGrouped args =>
     let atom := args[1]!
@@ -165,10 +170,8 @@ def elabRegex : TermElab := fun stx type? => do
   go.run' {}
 
 run_meta do
-  let t ← `(term| [regex|(ab|c|2|3)])
+  let t ← `(term| [regex|[^a-zA-Z_0-9]])
   let t2 ← `(term| [regex|a bc+[\wa-z]+c{1,2}(ab(c))*|2])
   println! "{t}"
-  let f2 ← PrettyPrinter.ppTerm t2
+  let f2 ← PrettyPrinter.ppTerm t
   println! "{f2}"
-
-#eval [regex|ab|c|2|3]

@@ -1,7 +1,3 @@
-/- **DESIGN NOTE**
-The following types serve as AST but not what to be run effectively.
--/
-
 inductive RegEx.Quant where
   | many
   | many1
@@ -24,9 +20,9 @@ inductive RegEx where
   | dollar -- $
   | char (c : Char)
   | fuzzy (c : RegEx.Fuzzy)
-  | set (rs : Array RegEx) --
+  | set (rs : Array RegEx)
+  | setNeg (rs : Array RegEx) -- `set` and `setNeg` can only match one character
   | setRange (low : Char) (high : Char)
-  | setNeg (rs : Array RegEx)
   | seq (rs : Array RegEx)
   | group (a : RegEx)
   | quant (e : RegEx) (q : RegEx.Quant)
