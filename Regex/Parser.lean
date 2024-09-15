@@ -1,13 +1,51 @@
 import Lean
+import Regex.Basic
 
 open Lean Parser PrettyPrinter Syntax.MonadTraverser
 
 namespace Regex.Parser
 
+/- **DESIGN NOTE:**
+Our purpose is to find as much as errors with aid of Lean4's compiler.
+
+Whitespaces must be handled manually, because Lean4's infrastructure doesn't care about the spaces between tokens.
+This is why there are many hand-written `ParserFn`s rather than `ParserDescr`s.
+
+To avoid too much memory being taken by characters, we make them each a `Syntax.atom` rather than `Syntax.node`.
+
+All these concerns will make the parser much more tedious.
+
+The following is syntax rules for regex.
+The uppercase-leading nodes are tagged with their own `SyntaxNodeKind`.
+There's no antiquot due to recursion, and cannot be implemented with syntax category (whitespaces sensitive).
+-/
+
+/-
+
+  terminals := { atomChar, setChar, num }
+
+  Atom → Quantified+ ('|' (Quantified+))*
+  Quantified → body quant?
+
+  body → atomChar | Set | Group
+
+  quant → '*' | '+' | '?' | quantRange
+  quantRange → '{' num (',' num?)? '}'
+
+  Group → '(' Atom ')'
+
+  Set → '[' regexSetElem* ']'
+  Set → '[^' regexSetElem* ']'
+
+  regexSetElem → setChar ('-' setChar)
+
+-/
+
+
 -- set_option trace.Elab.definition true
 
 def escapes : Array Char := #[ 'w', 'W', 's', 'S', 'd', 'D', 'n', 'r', 't' ]
-def metaChars : Array Char := #[ '*', '+', '?', '^', '$', '(', ')', '[', ']', '{', '}' ]
+def metaChars : Array Char := #[ '*', '+', '?', '(', ')', '[', ']', '{', '}' ]
 def metaCharsSetElem : Array Char := metaChars.erase ']'
 
 partial def regexCharEscapedAux : ParserFn := rawFn (trailingWs := false) fun c s =>
@@ -30,7 +68,7 @@ partial def regexCharFn (meta : Bool) : ParserFn := fun c s =>
   let input := c.input
   let i     := s.pos
   let curr  := input.get i
-  if curr == ' ' || curr.isAlpha || curr.isDigit || curr == '_' || curr == '-' || curr == '.' then
+  if curr == ' ' || curr.isAlpha || curr.isDigit || curr == '_' || curr == '-' || curr == '.' || curr == '^' || curr == '$' then
     rawFn (satisfyFn (fun _ => true) "") false c s
   else if !meta && metaCharsSetElem.contains curr then
     rawFn (satisfyFn (fun _ => true) "") false c s
@@ -81,8 +119,6 @@ private def ch_comma : Parser := rawCh ','
 private def ch_sharp : Parser := rawCh '#'
 private def ch_r : Parser := rawCh 'r'
 private def ch_e : Parser := rawCh 'e'
-private def ch_cap : Parser := rawCh '^'
-private def ch_dollar : Parser := rawCh '$'
 private def ch_dquote : Parser := rawCh '"'
 
 def regexSetElem : Parser := node `regexSetElem <| regexSetChar >> atomic (optional (ch_bar >> regexSetChar))
@@ -145,30 +181,30 @@ partial def regexAtomGroupedFn := nodeFn `regexAtomGrouped fun c s =>
 
 end
 
-def regexAtomNoAntiquot : Parser where
+def regexAtom : Parser where
   fn := regexAtomFn
   info := mkAtomicInfo "regexAtom"
 
-def regexAtomQuantifiedNoAntiquot : Parser where
+def regexAtomQuantified : Parser where
   fn := regexAtomQuantifiedFn
   info := mkAtomicInfo "regexAtomQuantified"
 
-def regexAtomGroupedNoAntiquot : Parser where
+def regexAtomGrouped : Parser where
   fn := regexAtomGroupedFn
   info := mkAtomicInfo "regexAtomGrouped"
 
 open Parenthesizer Formatter in
 mutual
 
-@[combinator_parenthesizer regexAtomQuantifiedNoAntiquot]
-partial def regexAtomQuantifiedNoAntiquot.parenthesizer : Parenthesizer := do checkKind `regexAtomQuantified; visitToken
-@[combinator_parenthesizer regexAtomNoAntiquot]
-partial def regexAtomNoAntiquot.parenthesizer : Parenthesizer := do checkKind `regexAtom; visitToken
-@[combinator_parenthesizer regexAtomGroupedNoAntiquot]
-partial def regexAtomGroupedNoAntiquot.parenthesizer : Parenthesizer := do checkKind `regexAtomGrouped; visitToken
+@[combinator_parenthesizer regexAtomQuantified]
+partial def regexAtomQuantified.parenthesizer : Parenthesizer := do checkKind `regexAtomQuantified; visitToken
+@[combinator_parenthesizer regexAtom]
+partial def regexAtom.parenthesizer : Parenthesizer := do checkKind `regexAtom; visitToken
+@[combinator_parenthesizer regexAtomGrouped]
+partial def regexAtomGrouped.parenthesizer : Parenthesizer := do checkKind `regexAtomGrouped; visitToken
 
-@[combinator_formatter regexAtomQuantifiedNoAntiquot]
-partial def regexAtomQuantifiedNoAntiquot.formatter : Formatter := do
+@[combinator_formatter regexAtomQuantified]
+partial def regexAtomQuantified.formatter : Formatter := do
   checkKind `regexAtomQuantified
   visitArgs do
     if (← getCur).isNone then
@@ -179,35 +215,23 @@ partial def regexAtomQuantifiedNoAntiquot.formatter : Formatter := do
     match stx with
     | .atom i s => regexChar.formatter
     | .node _ `regexSet _ => regexSet.formatter
-    | .node _ `regexAtomGrouped _ => regexAtomGroupedNoAntiquot.formatter
+    | .node _ `regexAtomGrouped _ => regexAtomGrouped.formatter
     | _ => throwError s!"unsupported {stx}"
 
-@[combinator_formatter regexAtomNoAntiquot]
-partial def regexAtomNoAntiquot.formatter : Formatter := do
+@[combinator_formatter regexAtom]
+partial def regexAtom.formatter : Formatter := do
   checkKind `regexAtom
   visitArgs do
-    sepBy1.formatter (many1.formatter regexAtomQuantifiedNoAntiquot.formatter) "|" (rawCh.formatter '|')
+    sepBy1.formatter (many1.formatter regexAtomQuantified.formatter) "|" (rawCh.formatter '|')
 
-@[combinator_formatter regexAtomGroupedNoAntiquot]
-partial def regexAtomGroupedNoAntiquot.formatter : Formatter := do
+@[combinator_formatter regexAtomGrouped]
+partial def regexAtomGrouped.formatter : Formatter := do
   checkKind `regexAtomGrouped
   visitArgs do
     rawCh.formatter ')'
-    many.formatter regexAtomNoAntiquot.formatter
+    many.formatter regexAtom.formatter
     rawCh.formatter '('
-
-@[run_parser_attribute_hooks]
-partial def regexAtomQuantified : Parser :=
-  withAntiquot (mkAntiquot "regexAtomQuantified" `regexAtomQuantified) regexAtomQuantifiedNoAntiquot
-
-@[run_parser_attribute_hooks]
-partial def regexAtom : Parser :=
-  withAntiquot (mkAntiquot "regexAtom" `regexAtom) regexAtomNoAntiquot
-
-@[run_parser_attribute_hooks]
-partial def regexAtomGrouped : Parser :=
-  withAntiquot (mkAntiquot "regexAtomGrouped" `regexAtomGrouped) regexAtomGroupedNoAntiquot
 
 end
 
-syntax (name := regex) "re" noWs ch_dquote noWs (ch_cap)? (regexAtom)? (ch_dollar)? noWs ch_dquote : term
+syntax (name := regex) "re" noWs ch_dquote noWs (regexAtom)? noWs ch_dquote : term
