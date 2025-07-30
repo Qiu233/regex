@@ -125,57 +125,18 @@ private def ch_e : Parser := rawCh 'e'
 private def ch_dquote : Parser := rawCh '"'
 private def ch_vbar : Parser := rawCh '|'
 
+run_meta do
+  modifyEnv (addSyntaxNodeKind (k := `regexSetElem))
+  modifyEnv (addSyntaxNodeKind (k := `regexSet))
+
+@[run_parser_attribute_hooks]
 def regexSetElem : Parser := node `regexSetElem <| regexSetChar >> atomic (optional (ch_bar >> regexSetChar))
-
-open Parenthesizer in
-@[combinator_parenthesizer regexSetElem]
-def regexSetElem.parenthesizer : Parenthesizer := do
-  checkKind `regexSetElem
-  visitArgs do
-    if !(← getCur).isNone then
-      visitArgs do
-        regexChar.parenthesizer
-        visitToken
-    else
-      goLeft
-    regexChar.parenthesizer
-
-open Formatter in
-@[combinator_formatter regexSetElem]
-partial def regexSetElem.formatter : Formatter := do
-  checkKind `regexSetElem
-  visitArgs do
-    if !(← getCur).isNone then
-      visitArgs do
-        regexChar.formatter
-        modify fun st => { st with stack := st.stack.push "-", isUngrouped := false }
-        goLeft
-    else
-      goLeft
-    regexChar.formatter
 
 def regexSetPos := atomic (rawCh '[' >> many regexSetElem >> rawCh ']')
 def regexSetNeg := atomic (group (rawCh '[' >> rawCh '^') >> many regexSetElem >> rawCh ']')
 
+@[run_parser_attribute_hooks]
 def regexSet : Parser := node `regexSet (regexSetNeg <|> regexSetPos)
-
-open Parenthesizer in
-@[combinator_parenthesizer regexSet]
-def regexSet.parenthesizer : Parenthesizer := do
-  checkKind `regexSet
-  visitArgs do
-    visitToken
-    many.parenthesizer regexSetElem.parenthesizer
-    visitToken
-
-open Formatter in
-@[combinator_formatter regexSet]
-partial def regexSet.formatter : Formatter := do
-  checkKind `regexSet
-  visitArgs do
-    visitAtom Name.anonymous
-    many.formatter regexSetElem.formatter
-    visitAtom Name.anonymous
 
 @[run_parser_attribute_hooks]
 def regexQuant : Parser := ch_mul <|> ch_add <|> ch_opt
