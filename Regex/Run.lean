@@ -64,14 +64,25 @@ partial def atomic (x : RegExM Unit) : RegExM Unit := do
 partial def run (s : RegEx) : RegExM Unit := do
   match s with
   | .none => throw ()
-  | .dot => _ ← next
+  | .dot =>
+    let c ← next
+    guard <| c != '\n'
   | .cap =>
+    let c ← read
     let s ← get
-    guard <| s.pos == 0
+    if s.pos == 0 then
+      return
+    else
+      let pos := c.input.prev s.pos
+      guard <| c.input.get pos == '\n'
   | .dollar =>
     let c ← read
     let s ← get
-    guard <| s.pos == c.input.endPos
+    if s.pos == c.input.endPos then
+      return
+    else
+      let pos := c.input.next s.pos
+      guard <| c.input.get pos == '\n'
   | .char c =>
     let t ← next
     guard <| t == c
