@@ -1,16 +1,19 @@
 import Regex.Basic
 import Regex.Elab
 
-structure RegEx.Context where
+namespace Regex
+namespace Run
+
+structure Context where
   input : String
 deriving Inhabited, Repr
 
-structure RegEx.State where
+structure State where
   pos : String.Pos := 0
   captures : Array (Option Substring) := #[]
 deriving Inhabited, Repr
 
-abbrev RegExM := ReaderT RegEx.Context <| StateT RegEx.State <| ExceptT Unit Id
+abbrev RegExM := ReaderT Context <| StateT State <| ExceptT Unit Id
 
 instance : Alternative RegExM where
   failure := throw ()
@@ -19,8 +22,6 @@ instance : Alternative RegExM where
     match v with
     | .ok v => .ok v
     | .error _ => b () c s
-
-namespace RegEx
 
 def next : RegExM Char := fun c s =>
   if h : c.input.atEnd s.pos then
@@ -87,12 +88,12 @@ partial def run (s : RegEx) : RegExM Unit := do
     let t ← next
     guard <| t == c
   -- TODO: replace this by more efficient implementations
-  | .fuzzy .w => run ([regex|[a-zA-Z_0-9]])
-  | .fuzzy .W => run ([regex|[^a-zA-Z_0-9]])
-  | .fuzzy .s => run ([regex|[ \f\n\r\t\v]])
-  | .fuzzy .S => run ([regex|[^ \f\n\r\t\v]])
-  | .fuzzy .d => run ([regex|[0-9]])
-  | .fuzzy .D => run ([regex|[^0-9]])
+  | .class .w => run regex%[[a-zA-Z_0-9]]
+  | .class .W => run regex%[[^a-zA-Z_0-9]]
+  | .class .s => run regex%[[ \f\n\r\t\v]]
+  | .class .S => run regex%[[^ \f\n\r\t\v]]
+  | .class .d => run regex%[[0-9]]
+  | .class .D => run regex%[[^0-9]]
   | .set es =>
     let actions := es.map run |>.foldl (init := failure) (· <|> ·)
     atomic actions
@@ -140,7 +141,7 @@ partial def run (s : RegEx) : RegExM Unit := do
         for _ in [:n] do
           run e
 
-end RegEx
+end Run
 
 partial def RegEx.match (r : RegEx) (s : String) : Array <| Array Substring := go 0
   where
@@ -148,19 +149,9 @@ partial def RegEx.match (r : RegEx) (s : String) : Array <| Array Substring := g
     if h : s.atEnd pos then
       #[]
     else
-      let t : Except _ _ := r.run {input := s} {pos := pos}
+      let t : Except _ _ := Run.run r {input := s} {pos := pos}
       match t with
       | .error _ => go (s.next' pos h)
       | .ok ((), t) =>
         let cs := t.captures.map fun x => x.get!
         #[cs].append <| go t.pos
-
-#eval [regex|ab|c|2|3]
-#eval [regex|[a-zA-Z_0-9]]
-#eval [regex|[^a-zA-Z_0-9]]
-#eval [regex|[ \f\n\r\t\v]]
-#eval [regex|[^ \f\n\r\t\v]]
-#eval [regex|[0-9]]
-#eval [regex|[^0-9]]
-
-#eval RegEx.match ([regex|(a(bc))(d|a)|(\d{3,4})]) "abcaabcd12345"

@@ -5,26 +5,30 @@ open Lean Parser PrettyPrinter Syntax.MonadTraverser
 
 namespace Regex.Parser
 
-/- **DESIGN NOTE**
+/-!
+# DESIGN NOTE
 Our purpose is to find as much as errors with aid of Lean4's compiler.
-
 Whitespaces must be handled manually, because Lean4's infrastructure doesn't care about the spaces between tokens.
 This is why there are many hand-written `ParserFn`s rather than `ParserDescr`s.
-
 To avoid too much memory being taken by characters, we make them each a `Syntax.atom` rather than `Syntax.node`.
-
-All these concerns will make the parser much more tedious.
-
-The following is syntax rules for regex.
-The uppercase-leading nodes are tagged with their own `SyntaxNodeKind`.
-There's no antiquot due to recursion, and cannot be implemented with syntax category (whitespaces sensitive).
+All these concerns make the parser much more tedious.
 -/
 
-/-
+/-!
+# Grammar
+By "meta character", we mean characters like '[', '*', '{' which are not matched but control how the regular expression works.
+But note the fact that `[[]` is a valid regular expression which match against the single character '[', while its counterpart `[]]` is invalid.
+This is the very reason we partition the character parser into two basic classes:
+* `setChar`: parses a character, as if it were within a pair of brackets. In this mode, all meta characters except for ']' are considered non-meta.
+* `atomChar`: parses a character with respect to all meta characters.
 
+In both mode, escapes are always considered.
+
+```
   terminals := { atomChar, setChar, num }
 
   Atom → Quantified+ ('|' (Quantified+))*
+
   Quantified → body quant?
 
   body → atomChar | Set | Group
@@ -38,16 +42,8 @@ There's no antiquot due to recursion, and cannot be implemented with syntax cate
   Set → '[^' SetElem* ']'
 
   SetElem → setChar ('-' setChar)?
-
+```
 -/
-
-
--- set_option trace.Elab.definition true
-
-def escapes : Array Char := #[ 'w', 'W', 's', 'S', 'd', 'D', 'n', 'r', 't', 'f', 'v' ]
-def metaChars : Array Char := #[ '*', '+', '?', '(', ')', '[', ']', '{', '}', '|' ]
-def metaCharsSetElem : Array Char := metaChars.erase ']'
-def forbiddenChars : Array Char := #['\r', '\n', '\t', '\x0C', '\x0B'] -- other characters is forbidden by Lean4?
 
 partial def regexCharEscapedAux : ParserFn := rawFn (trailingWs := false) fun c s =>
   let input := c.input
@@ -60,7 +56,7 @@ partial def regexCharEscapedAux : ParserFn := rawFn (trailingWs := false) fun c 
     if h : input.atEnd i then s.mkEOIError
     else
       let curr := input.get i
-      if escapes.contains curr then
+      if escapes.contains curr || metaChars.contains curr then
         s.next' input i h
       else
         s.mkUnexpectedErrorAt "invalid escape" i
@@ -128,6 +124,17 @@ def regexQuantRange : Parser := leading_parser rawCh '{' >> numLit >> optional (
 @[run_parser_attribute_hooks]
 def regexQuant : Parser := rawCh '*' <|> rawCh '+' <|> rawCh '?'
   <|> regexQuantRange
+
+/-!
+It is very unfortunate that we cannot handle the recursion here by `categoryParser`,
+  as `prattParser` uses hard-coded `tokenFn` and `peekToken` to decide which parser to call,
+  which breaks parsing of the immediate space character after `|`.
+-/
+
+run_meta do
+  modifyEnv (addSyntaxNodeKind (k := `Regex.Parser.regexAtom))
+  modifyEnv (addSyntaxNodeKind (k := `Regex.Parser.regexAtomQuantified))
+  modifyEnv (addSyntaxNodeKind (k := `Regex.Parser.regexAtomGrouped))
 
 mutual
 
@@ -223,6 +230,9 @@ partial def regexAtomGrouped.formatter : Formatter := do
 
 end
 
-private def ch_vbar : Parser := rawCh '|'
+end Parser
 
-syntax (name := regex) withPosition("[regex" noWs ch_vbar noWs (regexAtom)? noWs "]") : term
+private def ch_vbar : Parser := rawCh '|'
+private def ch_dquote : Parser := rawCh '\"'
+
+scoped syntax:max (name := regex) withPosition("regex%[" noWs (Parser.regexAtom)? noWs "]") : term

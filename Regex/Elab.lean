@@ -22,24 +22,36 @@ private def mkCharLit (c : Char) :=
 private def mkChar (c : Char) :=
   Expr.app (Expr.const ``RegEx.char []) (mkCharLit c)
 
+@[inline]
 private def escape? : String → Option Char
   | "\\r" => '\r'
   | "\\n" => '\n'
   | "\\t" => '\t'
   | "\\f" => '\x0C'
   | "\\v" => '\x0B'
+  | "\\*" => '*'
+  | "\\+" => '+'
+  | "\\?" => '?'
+  | "\\(" => '('
+  | "\\)" => ')'
+  | "\\[" => '['
+  | "\\]" => ']'
+  | "\\{" => '{'
+  | "\\}" => '}'
+  | "\\|" => '|'
   | _ => none
 
-private def fuzzy? : String → Option Expr
-  | "\\w" => mkFuzzy ``Fuzzy.w
-  | "\\W" => mkFuzzy ``Fuzzy.W
-  | "\\s" => mkFuzzy ``Fuzzy.s
-  | "\\S" => mkFuzzy ``Fuzzy.S
-  | "\\d" => mkFuzzy ``Fuzzy.d
-  | "\\D" => mkFuzzy ``Fuzzy.D
+@[inline]
+private def class? : String → Option Expr
+  | "\\w" => mkClass ``Class.w
+  | "\\W" => mkClass ``Class.W
+  | "\\s" => mkClass ``Class.s
+  | "\\S" => mkClass ``Class.S
+  | "\\d" => mkClass ``Class.d
+  | "\\D" => mkClass ``Class.D
   | _ => none
   where
-    mkFuzzy x := Expr.app (Expr.const ``RegEx.fuzzy []) (Expr.const x [])
+    mkClass x := Expr.app (Expr.const ``RegEx.class []) (Expr.const x [])
 
 mutual
 
@@ -68,7 +80,7 @@ private partial def elabRegexChar : Syntax → RegexElabM (Expr × Option Char) 
       return (Expr.const ``RegEx.dollar [], none)
   if let some c := escape? s then
     return (mkChar c, some c)
-  if let some f := fuzzy? s then
+  if let some f := class? s then
     return (f, none)
   unless s.length == 1 do
     panic! s!"{s} is not handled"
@@ -148,7 +160,7 @@ private partial def elabRegexQuantified : TSyntax ``regexAtomQuantified → Rege
 
 end
 
-@[term_elab Regex.Parser.regex]
+@[term_elab Regex.regex]
 def elabRegex : TermElab := fun stx type? => do
   if stx.hasMissing then
     throwError "syntax cannot contains missing"
@@ -158,7 +170,7 @@ def elabRegex : TermElab := fun stx type? => do
       throwTypeExcepted ex
   unless stx.getKind == ``regex do
     throwUnsupportedSyntax
-  let atom? := stx[2]
+  let atom? := stx[1]
   if atom?.isNone then
     return Expr.const ``RegEx.none []
   let atom := atom?[0]
@@ -168,10 +180,3 @@ def elabRegex : TermElab := fun stx type? => do
   let atom := TSyntax.mk (ks := ``regexAtom) atom
   let go := elabRegexAtom atom {}
   go.run' {}
-
-run_meta do
-  let t ← `(term| [regex|[^a-zA-Z_0-9]])
-  let t2 ← `(term| [regex|a bc+[\wa-z]+c{1,2}(ab(c))*|2])
-  println! "{t}"
-  let f2 ← PrettyPrinter.ppTerm t
-  println! "{f2}"

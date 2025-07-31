@@ -1,8 +1,6 @@
 import Lake
 open Lake DSL
 
-require "leanprover-community" / "Qq" @ git "v4.11.0"
-
 package "regex" where
   -- add package configuration options here
 
