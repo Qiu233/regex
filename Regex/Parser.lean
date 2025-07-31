@@ -37,7 +37,7 @@ There's no antiquot due to recursion, and cannot be implemented with syntax cate
   Set → '[' SetElem* ']'
   Set → '[^' SetElem* ']'
 
-  SetElem → setChar ('-' setChar)
+  SetElem → setChar ('-' setChar)?
 
 -/
 
@@ -108,54 +108,41 @@ def regexChar.formatter : Formatter := do
     goLeft
   | _ => throwError s!"not an regex character: {← getCur}"
 
-private def ch_bar : Parser := rawCh '-'
-private def ch_mul : Parser := rawCh '*'
-private def ch_add : Parser := rawCh '+'
-private def ch_opt : Parser := rawCh '?'
-private def ch_parenL : Parser := rawCh '('
-private def ch_parenR : Parser := rawCh ')'
-private def ch_braceL : Parser := rawCh '{'
-private def ch_braceR : Parser := rawCh '}'
-private def ch_bracketL : Parser := rawCh '['
-private def ch_bracketR : Parser := rawCh ']'
-private def ch_comma : Parser := rawCh ','
-private def ch_sharp : Parser := rawCh '#'
-private def ch_r : Parser := rawCh 'r'
-private def ch_e : Parser := rawCh 'e'
-private def ch_dquote : Parser := rawCh '"'
-private def ch_vbar : Parser := rawCh '|'
-
 run_meta do
-  modifyEnv (addSyntaxNodeKind (k := `regexSetElem))
-  modifyEnv (addSyntaxNodeKind (k := `regexSet))
+  modifyEnv (addSyntaxNodeKind (k := `Regex.Parser.regexSetElem))
+  modifyEnv (addSyntaxNodeKind (k := `Regex.Parser.regexSet))
+  modifyEnv (addSyntaxNodeKind (k := `Regex.Parser.regexQuantRange))
 
 @[run_parser_attribute_hooks]
-def regexSetElem : Parser := node `regexSetElem <| regexSetChar >> atomic (optional (ch_bar >> regexSetChar))
+def regexSetElem : Parser := leading_parser regexSetChar >> atomic (optional (rawCh '-' >> regexSetChar))
 
 def regexSetPos := atomic (rawCh '[' >> many regexSetElem >> rawCh ']')
 def regexSetNeg := atomic (group (rawCh '[' >> rawCh '^') >> many regexSetElem >> rawCh ']')
 
 @[run_parser_attribute_hooks]
-def regexSet : Parser := node `regexSet (regexSetNeg <|> regexSetPos)
+def regexSet : Parser := leading_parser (regexSetNeg <|> regexSetPos)
 
 @[run_parser_attribute_hooks]
-def regexQuant : Parser := ch_mul <|> ch_add <|> ch_opt
-  <|> node `regexQuantRange (ch_braceL >> numLit >> optional (ch_comma >> optional numLit) >> ch_braceR)
+def regexQuantRange : Parser := leading_parser rawCh '{' >> numLit >> optional (rawCh ',' >> optional numLit) >> rawCh '}'
+
+@[run_parser_attribute_hooks]
+def regexQuant : Parser := rawCh '*' <|> rawCh '+' <|> rawCh '?'
+  <|> regexQuantRange
 
 mutual
 
-partial def regexAtomFn : ParserFn := nodeFn `regexAtom <| sepBy1Fn false (sep := chFn '|') (many1Fn regexAtomQuantifiedFn)
+partial def regexAtomFn : ParserFn := nodeFn `Regex.Parser.regexAtom <| sepBy1Fn false (sep := chFn '|') (many1Fn regexAtomQuantifiedFn)
 
-partial def regexAtomQuantifiedFn := nodeFn `regexAtomQuantified <| andthenFn regexAtomBodyFn regexAtomQuantifierOptFn
+partial def regexAtomQuantifiedFn := nodeFn `Regex.Parser.regexAtomQuantified <| andthenFn regexAtomBodyFn regexAtomQuantifierOptFn
   where
     regexAtomQuantifierOptFn := optionalFn regexQuant.fn
     regexAtomBodyFn := orelseFn regexAtomChar.fn <| orelseFn regexSet.fn <| regexAtomGroupedFn
 
-partial def regexAtomGroupedFn := nodeFn `regexAtomGrouped fun c s =>
+partial def regexAtomGroupedFn := nodeFn `Regex.Parser.regexAtomGrouped fun c s =>
   let i := s.pos
   let curr := c.input.get i
   if curr == '(' then
-    andthenFn ch_parenL.fn (andthenFn regexAtomFn ch_parenR.fn) c s
+    andthenFn (chFn '(') (andthenFn regexAtomFn (chFn ')')) c s
   else
     s.mkErrorAt "'('" i
 
@@ -178,7 +165,7 @@ mutual
 
 @[combinator_parenthesizer regexAtomQuantified]
 partial def regexAtomQuantified.parenthesizer : Parenthesizer := do
-  checkKind `regexAtomQuantified
+  checkKind `Regex.Parser.regexAtomQuantified
   visitArgs do
     if (← getCur).isNone then
       goLeft
@@ -187,19 +174,19 @@ partial def regexAtomQuantified.parenthesizer : Parenthesizer := do
     let stx ← getCur
     match stx with
     | .atom i s => regexChar.parenthesizer
-    | .node _ `regexSet _ => regexSet.parenthesizer
-    | .node _ `regexAtomGrouped _ => regexAtomGrouped.parenthesizer
+    | .node _ `Regex.Parser.regexSet _ => regexSet.parenthesizer
+    | .node _ `Regex.Parser.regexAtomGrouped _ => regexAtomGrouped.parenthesizer
     | _ => throwError s!"unsupported {stx}"
 
 @[combinator_parenthesizer regexAtom]
 partial def regexAtom.parenthesizer : Parenthesizer := do
-  checkKind `regexAtom
+  checkKind `Regex.Parser.regexAtom
   visitArgs do
     sepBy1.parenthesizer (many1.parenthesizer regexAtomQuantified.parenthesizer) "|" (rawCh.parenthesizer '|')
 
 @[combinator_parenthesizer regexAtomGrouped]
 partial def regexAtomGrouped.parenthesizer : Parenthesizer := do
-  checkKind `regexAtomGrouped
+  checkKind `Regex.Parser.regexAtomGrouped
   visitArgs do
     rawCh.parenthesizer ')'
     regexAtom.parenthesizer
@@ -207,7 +194,7 @@ partial def regexAtomGrouped.parenthesizer : Parenthesizer := do
 
 @[combinator_formatter regexAtomQuantified]
 partial def regexAtomQuantified.formatter : Formatter := do
-  checkKind `regexAtomQuantified
+  checkKind `Regex.Parser.regexAtomQuantified
   visitArgs do
     if (← getCur).isNone then
       goLeft
@@ -216,24 +203,26 @@ partial def regexAtomQuantified.formatter : Formatter := do
     let stx ← getCur
     match stx with
     | .atom i s => regexChar.formatter
-    | .node _ `regexSet _ => regexSet.formatter
-    | .node _ `regexAtomGrouped _ => regexAtomGrouped.formatter
+    | .node _ `Regex.Parser.regexSet _ => regexSet.formatter
+    | .node _ `Regex.Parser.regexAtomGrouped _ => regexAtomGrouped.formatter
     | _ => throwError s!"unsupported {stx}"
 
 @[combinator_formatter regexAtom]
 partial def regexAtom.formatter : Formatter := do
-  checkKind `regexAtom
+  checkKind `Regex.Parser.regexAtom
   visitArgs do
     sepBy1.formatter (many1.formatter regexAtomQuantified.formatter) "|" (rawCh.formatter '|')
 
 @[combinator_formatter regexAtomGrouped]
 partial def regexAtomGrouped.formatter : Formatter := do
-  checkKind `regexAtomGrouped
+  checkKind `Regex.Parser.regexAtomGrouped
   visitArgs do
     rawCh.formatter ')'
     regexAtom.formatter
     rawCh.formatter '('
 
 end
+
+private def ch_vbar : Parser := rawCh '|'
 
 syntax (name := regex) withPosition("[regex" noWs ch_vbar noWs (regexAtom)? noWs "]") : term

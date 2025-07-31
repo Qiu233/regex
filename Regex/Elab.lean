@@ -43,11 +43,11 @@ private def fuzzy? : String → Option Expr
 
 mutual
 
-private partial def elabRegexAtom : TSyntax `regexAtom → RegexElabM Expr := fun stx => do
+private partial def elabRegexAtom : TSyntax ``regexAtom → RegexElabM Expr := fun stx => do
   let components := stx.raw[0].getSepArgs
   let ors ← components.mapM fun qs => withRef qs do
-    let qs := TSyntaxArray.mk (ks := `regexAtomQuantified) qs.getArgs
-    let ands ← qs.mapM fun (q : TSyntax `regexAtomQuantified) => withRef q (elabRegexQuantified q)
+    let qs := TSyntaxArray.mk (ks := ``regexAtomQuantified) qs.getArgs
+    let ands ← qs.mapM fun (q : TSyntax ``regexAtomQuantified) => withRef q (elabRegexQuantified q)
     if ands.size == 1 then
       return ands[0]!
     let arr ← mkArrayLit typeExpr ands.toList
@@ -75,7 +75,7 @@ private partial def elabRegexChar : Syntax → RegexElabM (Expr × Option Char) 
   let c := s.toList[0]!
   return (mkChar c, some c)
 
-private partial def elabRegexSetElem : TSyntax `regexSetElem → RegexElabM Expr := fun stx => do
+private partial def elabRegexSetElem : TSyntax ``regexSetElem → RegexElabM Expr := fun stx => do
   let char := stx.raw[0]
   let suffix := stx.raw[1]
   if suffix.isNone then
@@ -94,9 +94,9 @@ private partial def elabRegexBody : Syntax → RegexElabM Expr := fun body => do
   | .atom .. =>
     let t ← withRef body <| Prod.fst <$> elabRegexChar body
     pure t
-  | .node _ `regexSet args =>
+  | .node _ ``regexSet args =>
     let head := args[0]!
-    let setElems : TSyntaxArray `regexSetElem := TSyntaxArray.mk args[1]!.getArgs
+    let setElems : TSyntaxArray ``regexSetElem := TSyntaxArray.mk args[1]!.getArgs
     let setElems ← withTheReader Context ({· with inSet := true}) do
       setElems.mapM fun elem => withRef elem.raw <| elabRegexSetElem elem
     let arr ← mkArrayLit typeExpr setElems.toList
@@ -104,11 +104,11 @@ private partial def elabRegexBody : Syntax → RegexElabM Expr := fun body => do
     | .atom _ "[" => pure <| Expr.app (Expr.const ``RegEx.set []) arr
     | .node _ `group #[.atom _ "[", .atom _ "^"] => pure <| Expr.app (Expr.const ``RegEx.setNeg []) arr
     | _ => withRef head throwUnsupportedSyntax
-  | .node _ `regexAtomGrouped args =>
+  | .node _ ``regexAtomGrouped args =>
     let atom := args[1]!
-    unless atom.getKind == `regexAtom do
+    unless atom.getKind == ``regexAtom do
       withRef atom throwUnsupportedSyntax
-    let atom : TSyntax `regexAtom := TSyntax.mk atom
+    let atom : TSyntax ``regexAtom := TSyntax.mk atom
     let e ← withRef atom <| elabRegexAtom atom
     pure <| Expr.app (Expr.const ``RegEx.group []) e
   | _ => withRef body throwUnsupportedSyntax
@@ -118,7 +118,7 @@ private partial def elabRegexQuant : Syntax → RegexElabM Expr := fun stx => do
   | .atom _ "*" => return Expr.const ``Quant.many []
   | .atom _ "+" => return Expr.const ``Quant.many1 []
   | .atom _ "?" => return Expr.const ``Quant.opt []
-  | .node _ `regexQuantRange args =>
+  | .node _ ``regexQuantRange args =>
     let low := args[1]!
     let some low := low.isNatLit? | withRef low throwUnsupportedSyntax
     let suffix? := args[2]!
@@ -134,8 +134,8 @@ private partial def elabRegexQuant : Syntax → RegexElabM Expr := fun stx => do
     return Expr.app (Expr.app (Expr.const ``Quant.range []) (mkRawNatLit low)) (mkRawNatLit high)
   | _ => withRef stx throwUnsupportedSyntax
 
-private partial def elabRegexQuantified : TSyntax `regexAtomQuantified → RegexElabM Expr := fun stx => do
-  unless stx.raw.getKind == `regexAtomQuantified do
+private partial def elabRegexQuantified : TSyntax ``regexAtomQuantified → RegexElabM Expr := fun stx => do
+  unless stx.raw.getKind == ``regexAtomQuantified do
     throwUnsupportedSyntax
   let body := stx.raw[0]
   let quant? := stx.raw[1]
@@ -163,9 +163,9 @@ def elabRegex : TermElab := fun stx type? => do
     return Expr.const ``RegEx.none []
   let atom := atom?[0]
   let kind := atom.getKind
-  unless kind == `regexAtom do
-    throwError "expected syntax of kind `regexAtom, but got `{kind}"
-  let atom := TSyntax.mk (ks := `regexAtom) atom
+  unless kind == ``regexAtom do
+    throwError "expected syntax of kind `Regex.Parser.regexAtom, but got `{kind}"
+  let atom := TSyntax.mk (ks := ``regexAtom) atom
   let go := elabRegexAtom atom {}
   go.run' {}
 
