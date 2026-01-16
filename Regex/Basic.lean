@@ -9,7 +9,7 @@ inductive Quant where
   | rangeExact (n : Nat)
 deriving Inhabited, Repr
 
-inductive Class where
+inductive RegEx.Class where
   | w | W
   | s | S
   | d | D
@@ -21,7 +21,7 @@ inductive RegEx where
   | cap -- ^
   | dollar -- $
   | char (c : Char)
-  | class (c : Class)
+  | class (c : RegEx.Class)
   | set (rs : Array RegEx)
   | setNeg (rs : Array RegEx) -- `set` and `setNeg` can only match one character
   | setRange (low : Char) (high : Char)
@@ -30,11 +30,7 @@ inductive RegEx where
   | quant (e : RegEx) (q : Quant)
 deriving Inhabited, Repr
 
-
-def escapes : Array Char := #[ 'w', 'W', 's', 'S', 'd', 'D', 'n', 'r', 't', 'f', 'v' ]
-
-def metaChars : Array Char := #[ '*', '+', '?', '(', ')', '[', ']', '{', '}', '|' ]
-
-def metaCharsSetElem : Array Char := metaChars.erase ']'
-
-def forbiddenChars : Array Char := #['\r', '\n', '\t', '\x0C', '\x0B'] -- other characters is forbidden by Lean4?
+structure RegEx.Match where
+  slice : String.Slice
+  groups : Array String.Slice
+deriving Inhabited

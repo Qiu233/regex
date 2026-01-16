@@ -22,13 +22,26 @@ private def mkCharLit (c : Char) :=
 private def mkChar (c : Char) :=
   Expr.app (Expr.const ``RegEx.char []) (mkCharLit c)
 
-@[inline]
+private def decode_hex : Char → Nat := fun c =>
+  if c.isDigit then
+    c.toNat - '0'.toNat
+  else if 'a' ≤ c && c ≤ 'f' then
+    c.toNat - 'a'.toNat + 10
+  else if 'A' ≤ c && c ≤ 'F' then
+    c.toNat - 'A'.toNat + 10
+  else
+    panic! s!"{decl_name%}: invalid hex character"
+
 private def escape? : String → Option Char
   | "\\r" => '\r'
   | "\\n" => '\n'
   | "\\t" => '\t'
   | "\\f" => '\x0C'
   | "\\v" => '\x0B'
+  | "\\b" => '\x08'
+  | "\\e" => '\x1B'
+  | "\\a" => '\x07'
+  | "\\." => '.'
   | "\\*" => '*'
   | "\\+" => '+'
   | "\\?" => '?'
@@ -39,9 +52,24 @@ private def escape? : String → Option Char
   | "\\{" => '{'
   | "\\}" => '}'
   | "\\|" => '|'
-  | _ => none
+  | "\\^" => '^'
+  | "\\$" => '$'
+  | "\\\\" => '\\'
+  | s =>
+    if s.startsWith "\\x" && s.length == 4 then
+      let cs := s.toList
+      let a := decode_hex cs[2]!
+      let b := decode_hex cs[3]!
+      Char.ofNat <| (a <<< 4) ||| b
+    else if s.startsWith "\\u" && s.length == 8 then
+      let cs := s.toList
+      let body := cs.drop 2 |>.map decode_hex
+      let x := body.head!
+      let xs := body.tail
+      let v := xs.foldl (init := x) (fun acc x => (acc <<< 4) ||| x)
+      Char.ofNat v
+    else none
 
-@[inline]
 private def class? : String → Option Expr
   | "\\w" => mkClass ``Class.w
   | "\\W" => mkClass ``Class.W
@@ -167,7 +195,7 @@ def elabRegex : TermElab := fun stx type? => do
   type?.forM fun type => do
     let ex := Expr.const ``RegEx []
     unless (← isDefEq type ex) do
-      throwTypeExcepted ex
+      throwTypeExpected ex
   unless stx.getKind == ``regex do
     throwUnsupportedSyntax
   let atom? := stx[1]

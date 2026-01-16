@@ -46,35 +46,79 @@ In both mode, escapes are always considered.
 -/
 
 partial def regexCharEscapedAux : ParserFn := rawFn (trailingWs := false) fun c s =>
-  let input := c.input
   let pos   := s.pos
-  if input.get pos != '\\' then
+  if c.get pos != '\\' then
     s.mkError "'regexCharEscapedAux' must be called on '\\'"
   else
-    let s := s.next input pos
+    let s := s.next c pos
     let i := s.pos
-    if h : input.atEnd i then s.mkEOIError
+    if h : c.atEnd i then s.mkEOIError
     else
-      let curr := input.get i
-      if escapes.contains curr || metaChars.contains curr then
-        s.next' input i h
+      let curr := c.get i
+      if escapes.contains curr then
+        s.next' c i h
+      else if curr == 'x' then
+        let s := s.next' c i h
+        let i := s.pos
+        if h : c.atEnd i then s.mkEOIError else
+        let a := c.get' i h
+        if !is_hex a then s.mkUnexpectedError "hex digit" else
+        let s := s.next' c i h
+        let j := s.pos
+        if h : c.atEnd j then s.mkEOIError else
+        let b := c.get' j h
+        if !is_hex b then s.mkUnexpectedError "hex digit" else
+        s.next' c j h
+      else if curr == 'u' then
+        let s := s.next' c i h
+
+        let i := s.pos
+        if h : c.atEnd i then s.mkEOIError else
+        if !is_hex (c.get' i h) then s.mkUnexpectedError "hex digit" else
+        let s := s.next' c i h
+
+        let i := s.pos
+        if h : c.atEnd i then s.mkEOIError else
+        if !is_hex (c.get' i h) then s.mkUnexpectedError "hex digit" else
+        let s := s.next' c i h
+
+        let i := s.pos
+        if h : c.atEnd i then s.mkEOIError else
+        if !is_hex (c.get' i h) then s.mkUnexpectedError "hex digit" else
+        let s := s.next' c i h
+
+        let j := s.pos
+        if h : c.atEnd j then s.mkEOIError else
+        if !is_hex (c.get' j h) then s.mkUnexpectedError "hex digit" else
+        let s := s.next' c j h
+
+        let k := s.pos
+        if h : c.atEnd k then s.mkEOIError else
+        if !is_hex (c.get' k h) then s.mkUnexpectedError "hex digit" else
+        let s := s.next' c k h
+
+        let l := s.pos
+        if h : c.atEnd l then s.mkEOIError else
+        if !is_hex (c.get' l h) then s.mkUnexpectedError "hex digit" else
+        s.next' c l h
       else
         s.mkUnexpectedErrorAt "invalid escape" i
 
-partial def regexCharFn (meta : Bool) : ParserFn := fun c s =>
-  let input := c.input
+partial def regexCharFn (meta_ : Bool) : ParserFn := fun c s =>
   let i     := s.pos
-  let curr  := input.get i
+  let curr  := c.get i
   if forbiddenChars.contains curr then
     s.mkUnexpectedErrorAt s!"unexpected forbidden character '{curr}'" i
   else if curr == ' ' || curr.isAlpha || curr.isDigit || curr == '_' || curr == '-' ||
-     curr == '.' || curr == '^' || curr == '$' || curr == '\"' then
+    curr matches '.' | '^' | '$' | '\"' | '<' | '>' | '#' | '%' | ',' |
+      '/' | '\'' | '!' | '&' | '`' | '~' | '@'
+    then
     rawFn (satisfyFn (fun _ => true) "") false c s
-  else if !meta && metaCharsSetElem.contains curr then
+  else if !meta_ && metaCharsSetElem.contains curr then
     rawFn (satisfyFn (fun _ => true) "") false c s
   else if curr == '\\' then
     regexCharEscapedAux c s
-  else if meta && metaChars.contains curr then
+  else if meta_ && metaChars.contains curr then
     s.mkUnexpectedErrorAt s!"unexpected meta character '{curr}'" i
   else
     s.mkUnexpectedErrorAt s!"unexpected character '{curr}'" i
@@ -99,7 +143,7 @@ open Formatter in
 def regexChar.formatter : Formatter := do
   let stx ← getCur
   match stx with
-  | .atom info s =>
+  | .atom _ s =>
     modify fun st => { st with stack := st.stack.push s, isUngrouped := false }
     goLeft
   | _ => throwError s!"not an regex character: {← getCur}"
@@ -147,7 +191,7 @@ partial def regexAtomQuantifiedFn := nodeFn `Regex.Parser.regexAtomQuantified <|
 
 partial def regexAtomGroupedFn := nodeFn `Regex.Parser.regexAtomGrouped fun c s =>
   let i := s.pos
-  let curr := c.input.get i
+  let curr := c.get i
   if curr == '(' then
     andthenFn (chFn '(') (andthenFn regexAtomFn (chFn ')')) c s
   else
@@ -180,9 +224,9 @@ partial def regexAtomQuantified.parenthesizer : Parenthesizer := do
       visitArgs regexQuant.parenthesizer
     let stx ← getCur
     match stx with
-    | .atom i s => regexChar.parenthesizer
-    | .node _ `Regex.Parser.regexSet _ => regexSet.parenthesizer
-    | .node _ `Regex.Parser.regexAtomGrouped _ => regexAtomGrouped.parenthesizer
+    | .atom .. => regexChar.parenthesizer
+    | .node _ `regexSet _ => regexSet.parenthesizer
+    | .node _ `regexAtomGrouped _ => regexAtomGrouped.parenthesizer
     | _ => throwError s!"unsupported {stx}"
 
 @[combinator_parenthesizer regexAtom]
@@ -209,9 +253,9 @@ partial def regexAtomQuantified.formatter : Formatter := do
       visitArgs regexQuant.formatter
     let stx ← getCur
     match stx with
-    | .atom i s => regexChar.formatter
-    | .node _ `Regex.Parser.regexSet _ => regexSet.formatter
-    | .node _ `Regex.Parser.regexAtomGrouped _ => regexAtomGrouped.formatter
+    | .atom .. => regexChar.formatter
+    | .node _ `regexSet _ => regexSet.formatter
+    | .node _ `regexAtomGrouped _ => regexAtomGrouped.formatter
     | _ => throwError s!"unsupported {stx}"
 
 @[combinator_formatter regexAtom]
@@ -230,9 +274,4 @@ partial def regexAtomGrouped.formatter : Formatter := do
 
 end
 
-end Parser
-
-private def ch_vbar : Parser := rawCh '|'
-private def ch_dquote : Parser := rawCh '\"'
-
-scoped syntax:max (name := regex) withPosition("regex%[" noWs (Parser.regexAtom)? noWs "]") : term
+syntax:max (name := regex) withPosition("[regex" noWs ch_vbar noWs (regexAtom)? noWs "]") : term
