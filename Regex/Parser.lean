@@ -5,45 +5,23 @@ open Lean Parser PrettyPrinter Syntax.MonadTraverser
 
 namespace Regex.Parser
 
-/-!
-# DESIGN NOTE
-Our purpose is to find as much as errors with aid of Lean4's compiler.
-Whitespaces must be handled manually, because Lean4's infrastructure doesn't care about the spaces between tokens.
-This is why there are many hand-written `ParserFn`s rather than `ParserDescr`s.
-To avoid too much memory being taken by characters, we make them each a `Syntax.atom` rather than `Syntax.node`.
-All these concerns make the parser much more tedious.
--/
+-- set_option trace.Elab.definition true
 
-/-!
-# Grammar
-By "meta character", we mean characters like '[', '*', '{' which are not matched but control how the regular expression works.
-But note the fact that `[[]` is a valid regular expression which match against the single character '[', while its counterpart `[]]` is invalid.
-This is the very reason we partition the character parser into two basic classes:
-* `setChar`: parses a character, as if it were within a pair of brackets. In this mode, all meta characters except for ']' are considered non-meta.
-* `atomChar`: parses a character with respect to all meta characters.
+def escapes : Array Char := #[
+  'w', 'W', 's', 'S', 'd', 'D', 'n', 'r', 't', 'f', 'v', 'b', 'e', 'a', -- TODO: how about '\c'?
+  '.', '*', '+', '?', '(', ')', '[', ']', '{', '}',
+  '|', '^', '$', '\\'
+  ]
+def metaChars : Array Char := #[
+  '.', '*', '+', '?', '(', ')', '[', ']', '{', '}',
+  '|', '^', '$', '\\' ]
+def metaCharsSetElem : Array Char := #[
+  '.', '*', '+', '?', '(', ')', '[', '{', '}',
+  '|', '$' ]
+def forbiddenChars : Array Char := #['\r', '\n', '\t', '\x0C', '\x0B'] -- other characters is forbidden by Lean4?
 
-In both mode, escapes are always considered.
-
-```
-  terminals := { atomChar, setChar, num }
-
-  Atom → Quantified+ ('|' (Quantified+))*
-
-  Quantified → body quant?
-
-  body → atomChar | Set | Group
-
-  quant → '*' | '+' | '?' | QuantRange
-  QuantRange → '{' num (',' num?)? '}'
-
-  Group → '(' Atom ')'
-
-  Set → '[' SetElem* ']'
-  Set → '[^' SetElem* ']'
-
-  SetElem → setChar ('-' setChar)?
-```
--/
+private def is_hex : Char → Bool := fun c =>
+  c.isDigit || ('a' ≤ c && c ≤ 'f') || ('A' ≤ c && c ≤ 'F')
 
 partial def regexCharEscapedAux : ParserFn := rawFn (trailingWs := false) fun c s =>
   let pos   := s.pos
@@ -157,6 +135,7 @@ run_meta do
 def regexSetElem : Parser := leading_parser regexSetChar >> atomic (optional (rawCh '-' >> regexSetChar))
 
 def regexSetPos := atomic (rawCh '[' >> many regexSetElem >> rawCh ']')
+
 def regexSetNeg := atomic (group (rawCh '[' >> rawCh '^') >> many regexSetElem >> rawCh ']')
 
 @[run_parser_attribute_hooks]
@@ -225,19 +204,19 @@ partial def regexAtomQuantified.parenthesizer : Parenthesizer := do
     let stx ← getCur
     match stx with
     | .atom .. => regexChar.parenthesizer
-    | .node _ `regexSet _ => regexSet.parenthesizer
-    | .node _ `regexAtomGrouped _ => regexAtomGrouped.parenthesizer
+    | .node _ `Regex.Parser.regexSet _ => regexSet.parenthesizer
+    | .node _ `Regex.Parser.regexAtomGrouped _ => regexAtomGrouped.parenthesizer
     | _ => throwError s!"unsupported {stx}"
 
 @[combinator_parenthesizer regexAtom]
 partial def regexAtom.parenthesizer : Parenthesizer := do
-  checkKind `Regex.Parser.regexAtom
+  checkKind ``Regex.Parser.regexAtom
   visitArgs do
     sepBy1.parenthesizer (many1.parenthesizer regexAtomQuantified.parenthesizer) "|" (rawCh.parenthesizer '|')
 
 @[combinator_parenthesizer regexAtomGrouped]
 partial def regexAtomGrouped.parenthesizer : Parenthesizer := do
-  checkKind `Regex.Parser.regexAtomGrouped
+  checkKind ``Regex.Parser.regexAtomGrouped
   visitArgs do
     rawCh.parenthesizer ')'
     regexAtom.parenthesizer
@@ -245,7 +224,7 @@ partial def regexAtomGrouped.parenthesizer : Parenthesizer := do
 
 @[combinator_formatter regexAtomQuantified]
 partial def regexAtomQuantified.formatter : Formatter := do
-  checkKind `Regex.Parser.regexAtomQuantified
+  checkKind ``Regex.Parser.regexAtomQuantified
   visitArgs do
     if (← getCur).isNone then
       goLeft
@@ -254,19 +233,19 @@ partial def regexAtomQuantified.formatter : Formatter := do
     let stx ← getCur
     match stx with
     | .atom .. => regexChar.formatter
-    | .node _ `regexSet _ => regexSet.formatter
-    | .node _ `regexAtomGrouped _ => regexAtomGrouped.formatter
+    | .node _ `Regex.Parser.regexSet _ => regexSet.formatter
+    | .node _ `Regex.Parser.regexAtomGrouped _ => regexAtomGrouped.formatter
     | _ => throwError s!"unsupported {stx}"
 
 @[combinator_formatter regexAtom]
 partial def regexAtom.formatter : Formatter := do
-  checkKind `Regex.Parser.regexAtom
+  checkKind ``Regex.Parser.regexAtom
   visitArgs do
     sepBy1.formatter (many1.formatter regexAtomQuantified.formatter) "|" (rawCh.formatter '|')
 
 @[combinator_formatter regexAtomGrouped]
 partial def regexAtomGrouped.formatter : Formatter := do
-  checkKind `Regex.Parser.regexAtomGrouped
+  checkKind ``Regex.Parser.regexAtomGrouped
   visitArgs do
     rawCh.formatter ')'
     regexAtom.formatter
@@ -274,4 +253,4 @@ partial def regexAtomGrouped.formatter : Formatter := do
 
 end
 
-syntax:max (name := regex) withPosition("[regex" noWs ch_vbar noWs (regexAtom)? noWs "]") : term
+syntax:max (name := regex) withPosition("[regex|" noWs noWs (regexAtom)? noWs "]") : term

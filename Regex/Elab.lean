@@ -188,7 +188,7 @@ private partial def elabRegexQuantified : TSyntax ``regexAtomQuantified → Rege
 
 end
 
-@[term_elab Regex.regex]
+@[term_elab Regex.Parser.regex]
 def elabRegex : TermElab := fun stx type? => do
   if stx.hasMissing then
     throwError "syntax cannot contains missing"

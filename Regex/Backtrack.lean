@@ -71,7 +71,7 @@ partial def matchOptGreedy (x kont : RegExM input Unit) : RegExM input Unit := d
 variable (input : String) in
 partial def run (s : RegEx) (kont : RegExM input Unit) : RegExM input Unit := atomic do
   match s with
-  | .none => pure ()
+  | .none => throw ()
   | .dot =>
     let s ← next
     guard <| s != '\n'

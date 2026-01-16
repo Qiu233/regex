@@ -1,6 +1,4 @@
-namespace Regex
-
-inductive Quant where
+inductive RegEx.Quant where
   | many
   | many1
   | opt
@@ -27,7 +25,7 @@ inductive RegEx where
   | setRange (low : Char) (high : Char)
   | seq (rs : Array RegEx)
   | group (a : RegEx)
-  | quant (e : RegEx) (q : Quant)
+  | quant (e : RegEx) (q : RegEx.Quant)
 deriving Inhabited, Repr
 
 structure RegEx.Match where
